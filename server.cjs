@@ -18,6 +18,7 @@ const pool = new Pool({
 async function initDatabase() {
   try {
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
+    
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
@@ -31,9 +32,12 @@ async function initDatabase() {
         completed_at TIMESTAMP DEFAULT NULL
       );
     `);
+    
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
-    console.log("🗄️ Database Ready.");
-  } catch (err) { console.error("Migration Error: ", err.message); }
+    console.log("🗄️ Database Sync Success.");
+  } catch (err) { 
+    console.error("Migration Error: ", err.message); 
+  }
 }
 initDatabase();
 

@@ -8,7 +8,6 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// 🌟 เปิดประตูต้อนรับ Netlify และการรันข้ามโดเมน
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -16,26 +15,46 @@ app.use(cors({
 }));
 app.use(express.json()); 
 
-// 🌟 ตั้งค่า Database (ตอนเอาขึ้น Cloud ให้เอา connectionString จาก Neon.tech มาใส่แทน)
 const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'iqc_db',
-  password: 'passw0rd', // <--- รหัสผ่าน DB 
+  password: 'Utac_IQC_db_2026!', // <--- รหัสผ่านความปลอดภัยใหม่ของคุณเฟม
   port: 5432,
-  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require", // ใช้บรรทัดนี้ตอนขึ้น Cloud
 });
 
-// ตรวจสอบและเพิ่มคอลัมน์ให้อัตโนมัติ (ไม่มีคำสั่งลบตารางแน่นอน ข้อมูลไม่หายครับ!)
-pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`).catch(err => console.log("DB Notice: ", err.message));
+// 🌟 [Auto-Migration] ตรวจสอบและสร้าง Table ระบบหลักและคิวงานเปลี่ยนพิน
+async function initDatabase() {
+  try {
+    await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
+    
+    // สร้างตารางสำหรับระบบคิว Request Pin Changing แยกต่างหาก
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pin_changing_requests (
+        id SERIAL PRIMARY KEY,
+        location VARCHAR(50),
+        contac_no VARCHAR(100),
+        contac_sn VARCHAR(100),
+        requested_by VARCHAR(100),
+        accepted_by VARCHAR(100) DEFAULT NULL,
+        status VARCHAR(50) DEFAULT 'Awaiting',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP DEFAULT NULL
+      );
+    `);
+    console.log("🗄️ PostgreSQL Database System initialized successfully.");
+  } catch (err) {
+    console.error("DB Initialization Error: ", err.message);
+  }
+}
+initDatabase();
 
 const upload = multer({ dest: 'uploads/' });
 const SECRET_KEY = "Utac_Iqc_Enterprise_Secret_2026_XyZ"; 
 
-// 🔐 ฐานข้อมูล User
 const usersDB = [
   { username: "viewer", password: "View@Only26!", role: "viewer", name: "Guest User" },
-  { username: "user", password: "User@Iqc26!", role: "contactor", name: "Contactor Member" },
+  { username: "user", password: "User@Iqc26!", role: "contactor", name: "IQC Engineer" },
   { username: "admin", password: "Admin@Secure26!", role: "admin", name: "System Admin" }
 ];
 
@@ -60,36 +79,31 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// API 1: Fetch Full Query List
+// ==========================================
+// IQC PROTOCOL APIs
+// ==========================================
 app.get('/api/iqc-list', verifyToken, async (req, res) => {
   try {
-    const allRecords = await pool.query(`
-      SELECT id, location, date_recv, created_at, owner, send_by, hw_name, serial_no, invoice_no, checked_by, iqc_result, job_status, checklist_data
-      FROM iqc_records ORDER BY created_at DESC
-    `);
+    const allRecords = await pool.query(`SELECT id, location, date_recv, created_at, owner, send_by, hw_name, serial_no, invoice_no, checked_by, iqc_result, job_status, checklist_data FROM iqc_records ORDER BY created_at DESC`);
     const stats = await pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE iqc_result = 'PASS') as pass_count, COUNT(*) FILTER (WHERE iqc_result = 'FAIL') as fail_count FROM iqc_records`);
     res.status(200).json({ success: true, stats: stats.rows[0], data: allRecords.rows });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// API 2: Update Job Status
 app.put('/api/iqc-status/:id', verifyToken, async (req, res) => {
-  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewers cannot edit status" });
+  if (req.user.role === 'viewer') return res.status(403).json({ error: "Unauthorized" });
   try {
     await pool.query('UPDATE iqc_records SET job_status = $1 WHERE id = $2', [req.body.status, req.params.id]);
-    res.status(200).json({ success: true, message: "Status updated" });
+    res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// API 3: Submit Form
 app.post('/api/submit-iqc', verifyToken, upload.any(), async (req, res) => {
-  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewers cannot submit forms" });
-
+  if (req.user.role === 'viewer') return res.status(403).json({ error: "Unauthorized" });
   try {
     const iqcData = JSON.parse(req.body.iqcData);
     const documentPaths = [];
     const imagePaths = [];
-
     req.files.forEach(file => {
       const ext = path.extname(file.originalname);
       const newPath = `${file.path}${ext}`;
@@ -97,34 +111,83 @@ app.post('/api/submit-iqc', verifyToken, upload.any(), async (req, res) => {
       if (file.fieldname.startsWith('document_')) documentPaths.push({ type: file.fieldname, path: newPath });
       else if (file.fieldname.startsWith('image_')) imagePaths.push({ type: file.fieldname, path: newPath });
     });
-
     const primaryFields = ['hwName', 'supplier', 'dateRecv', 'invoiceNo', 'hwDesc', 'poNo', 'serialNo', 'customer', 'owner', 'sendBy', 'location', 'checkedBy', 'finalResult'];
     const checklistData = {};
     Object.keys(iqcData).forEach(key => { if (!primaryFields.includes(key)) checklistData[key] = iqcData[key]; });
 
     const insertQuery = `INSERT INTO iqc_records (hw_name, supplier, date_recv, invoice_no, hw_desc, po_no, serial_no, customer, owner, send_by, location, checked_by, iqc_result, job_status, checklist_data, document_paths, image_paths) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id;`;
     const values = [iqcData.hwName, iqcData.supplier, iqcData.dateRecv || null, iqcData.invoiceNo, iqcData.hwDesc, iqcData.poNo, iqcData.serialNo, iqcData.customer, iqcData.owner, iqcData.sendBy, iqcData.location, req.user.name, iqcData.finalResult || 'PENDING', 'Awaiting', JSON.stringify(checklistData), JSON.stringify(documentPaths), JSON.stringify(imagePaths)];
-
     const result = await pool.query(insertQuery, values);
     res.status(200).json({ success: true, id: result.rows[0].id });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// API 4: Delete Record
 app.delete('/api/iqc/:id', verifyToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Only administrators can delete records." });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
   try {
     const record = await pool.query('SELECT document_paths, image_paths FROM iqc_records WHERE id = $1', [req.params.id]);
-    if (record.rows.length === 0) return res.status(404).json({ error: "Record not found" });
-
+    if (record.rows.length === 0) return res.status(404).json({ error: "Not found" });
     const docs = record.rows[0].document_paths || [];
     const imgs = record.rows[0].image_paths || [];
-    [...docs, ...imgs].forEach(file => {
-      const filePath = path.join(__dirname, file.path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    });
-
+    [...docs, ...imgs].forEach(file => { const filePath = path.join(__dirname, file.path); if (fs.existsSync(filePath)) fs.unlinkSync(filePath); });
     await pool.query('DELETE FROM iqc_records WHERE id = $1', [req.params.id]);
+    res.status(200).json({ success: true });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ==========================================
+// 🚀 NEW SYSTEM WORKFLOW: PIN CHANGING QUEUE APIs
+// ==========================================
+
+// ดึงรายการ Request Pin Changing ทั้งหมด
+app.get('/api/pin-change-list', verifyToken, async (req, res) => {
+  try {
+    const records = await pool.query(`SELECT id, location, contac_no, contac_sn, requested_by, accepted_by, status, created_at, completed_at FROM pin_changing_requests ORDER BY created_at DESC`);
+    res.status(200).json({ success: true, data: records.rows });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// สร้างใบ Request เปลี่ยนพินอันใหม่ (เปิดสิทธิ์ให้ทุก Role)
+app.post('/api/pin-change-request', verifyToken, async (req, res) => {
+  try {
+    const { location, contac_no, contac_sn } = req.body;
+    await pool.query(
+      `INSERT INTO pin_changing_requests (location, contac_no, contac_sn, requested_by, status) VALUES ($1, $2, $3, $4, 'Awaiting')`,
+      [location, contac_no, contac_sn, req.user.name]
+    );
+    res.status(200).json({ success: true, message: "Request pin changing submitted successfully" });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// กดรับงาน (เฉพาะ User และ Admin) -> จะเปลี่ยนเป็น Pending โดยอัตโนมัติ
+app.put('/api/pin-change-accept/:id', verifyToken, async (req, res) => {
+  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewer cannot accept requests" });
+  try {
+    await pool.query(
+      `UPDATE pin_changing_requests SET status = 'Pending', accepted_by = $1 WHERE id = $2`,
+      [req.user.name, req.params.id]
+    );
+    res.status(200).json({ success: true, message: "Request moved to Pending" });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// อัปเดตสถานะเป็นเสร็จสมบูรณ์ Done (เฉพาะ User และ Admin)
+app.put('/api/pin-change-complete/:id', verifyToken, async (req, res) => {
+  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewer cannot update status" });
+  try {
+    await pool.query(
+      `UPDATE pin_changing_requests SET status = 'Done', completed_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [req.params.id]
+    );
+    res.status(200).json({ success: true, message: "Request marked as Done" });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ลบคิวงานเปลี่ยนพิน (เฉพาะ Admin)
+app.delete('/api/pin-change/:id', verifyToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Only Admin can delete requests" });
+  try {
+    await pool.query(`DELETE FROM pin_changing_requests WHERE id = $1`, [req.params.id]);
     res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });

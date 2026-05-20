@@ -7,24 +7,17 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-
-app.use(cors({
-  origin: '*', 
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
-}));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], credentials: true }));
 app.use(express.json()); 
 
+// 🔴 ใช้ : ไม่ใช่ = ในการตั้งค่า Connection
 const pool = new Pool({
-  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWbO0i@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 });
 
-// 🌟 [Auto-Migration] ตรวจสอบและสร้าง Table ระบบหลักและคิวงานเปลี่ยนพิน
 async function initDatabase() {
   try {
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
-    
-    // สร้างตารางสำหรับระบบคิว Request Pin Changing แยกต่างหาก
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
@@ -38,10 +31,9 @@ async function initDatabase() {
         completed_at TIMESTAMP DEFAULT NULL
       );
     `);
-    console.log("🗄️ PostgreSQL Database System initialized successfully.");
-  } catch (err) {
-    console.error("DB Initialization Error: ", err.message);
-  }
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
+    console.log("🗄️ Database Ready.");
+  } catch (err) { console.error("Migration Error: ", err.message); }
 }
 initDatabase();
 
@@ -61,23 +53,19 @@ app.post('/api/login', (req, res) => {
     const token = jwt.sign({ username: user.username, role: user.role, name: user.name }, SECRET_KEY, { expiresIn: '8h' });
     res.json({ success: true, token, role: user.role, name: user.name });
   } else {
-    res.status(401).json({ success: false, message: "Invalid username or password" });
+    res.status(401).json({ success: false, message: "Invalid credentials" });
   }
 });
 
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) return res.status(403).json({ message: "No token provided!" });
+  if (!token) return res.status(403).json({ message: "No token!" });
   jwt.verify(token, SECRET_KEY, (err, decoded) => {
     if (err) return res.status(401).json({ message: "Unauthorized!" });
-    req.user = decoded; 
-    next();
+    req.user = decoded; next();
   });
 };
 
-// ==========================================
-// IQC PROTOCOL APIs
-// ==========================================
 app.get('/api/iqc-list', verifyToken, async (req, res) => {
   try {
     const allRecords = await pool.query(`SELECT id, location, date_recv, created_at, owner, send_by, hw_name, serial_no, invoice_no, checked_by, iqc_result, job_status, checklist_data FROM iqc_records ORDER BY created_at DESC`);
@@ -87,7 +75,6 @@ app.get('/api/iqc-list', verifyToken, async (req, res) => {
 });
 
 app.put('/api/iqc-status/:id', verifyToken, async (req, res) => {
-  if (req.user.role === 'viewer') return res.status(403).json({ error: "Unauthorized" });
   try {
     await pool.query('UPDATE iqc_records SET job_status = $1 WHERE id = $2', [req.body.status, req.params.id]);
     res.status(200).json({ success: true });
@@ -131,11 +118,6 @@ app.delete('/api/iqc/:id', verifyToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// ==========================================
-// 🚀 NEW SYSTEM WORKFLOW: PIN CHANGING QUEUE APIs
-// ==========================================
-
-// ดึงรายการ Request Pin Changing ทั้งหมด
 app.get('/api/pin-change-list', verifyToken, async (req, res) => {
   try {
     const records = await pool.query(`SELECT id, location, contac_no, contac_sn, requested_by, accepted_by, status, created_at, completed_at FROM pin_changing_requests ORDER BY created_at DESC`);
@@ -143,49 +125,35 @@ app.get('/api/pin-change-list', verifyToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// สร้างใบ Request เปลี่ยนพินอันใหม่ (เปิดสิทธิ์ให้ทุก Role)
 app.post('/api/pin-change-request', verifyToken, async (req, res) => {
   try {
     const { location, contac_no, contac_sn } = req.body;
-    await pool.query(
-      `INSERT INTO pin_changing_requests (location, contac_no, contac_sn, requested_by, status) VALUES ($1, $2, $3, $4, 'Awaiting')`,
-      [location, contac_no, contac_sn, req.user.name]
-    );
-    res.status(200).json({ success: true, message: "Request pin changing submitted successfully" });
+    await pool.query(`INSERT INTO pin_changing_requests (location, contac_no, contac_sn, requested_by, status) VALUES ($1, $2, $3, $4, 'Awaiting')`, [location, contac_no, contac_sn, req.user.name]);
+    res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// กดรับงาน (เฉพาะ User และ Admin) -> จะเปลี่ยนเป็น Pending โดยอัตโนมัติ
 app.put('/api/pin-change-accept/:id', verifyToken, async (req, res) => {
-  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewer cannot accept requests" });
   try {
-    await pool.query(
-      `UPDATE pin_changing_requests SET status = 'Pending', accepted_by = $1 WHERE id = $2`,
-      [req.user.name, req.params.id]
-    );
-    res.status(200).json({ success: true, message: "Request moved to Pending" });
+    await pool.query(`UPDATE pin_changing_requests SET status = 'Pending', accepted_by = $1 WHERE id = $2`, [req.user.name, req.params.id]);
+    res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// อัปเดตสถานะเป็นเสร็จสมบูรณ์ Done (เฉพาะ User และ Admin)
 app.put('/api/pin-change-complete/:id', verifyToken, async (req, res) => {
-  if (req.user.role === 'viewer') return res.status(403).json({ error: "Viewer cannot update status" });
   try {
-    await pool.query(
-      `UPDATE pin_changing_requests SET status = 'Done', completed_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [req.params.id]
-    );
-    res.status(200).json({ success: true, message: "Request marked as Done" });
+    await pool.query(`UPDATE pin_changing_requests SET status = 'Done', completed_at = NOW() WHERE id = $1`, [req.params.id]);
+    res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// ลบคิวงานเปลี่ยนพิน (เฉพาะ Admin)
 app.delete('/api/pin-change/:id', verifyToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: "Only Admin can delete requests" });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: "Only Admin" });
   try {
     await pool.query(`DELETE FROM pin_changing_requests WHERE id = $1`, [req.params.id]);
     res.status(200).json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.listen(3000, () => console.log('🚀 Backend Secure Auth Server รันแล้วที่ พอร์ต 3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));

@@ -17,8 +17,10 @@ const pool = new Pool({
 
 async function initDatabase() {
   try {
+    // ใช้ ALTER TABLE เพื่อเพิ่มคอลัมน์โดยไม่ทำลายข้อมูลเดิม
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
     
+    // สร้างตาราง pin_changing_requests โดยไม่มี Comment // กวนใจ
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
@@ -33,7 +35,9 @@ async function initDatabase() {
       );
     `);
     
+    // เพิ่มคอลัมน์ completed_at ให้ตาราง pin_changing_requests
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
+    
     console.log("🗄️ Database Sync Success.");
   } catch (err) { 
     console.error("Migration Error: ", err.message); 

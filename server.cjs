@@ -16,11 +16,7 @@ app.use(cors({
 app.use(express.json()); 
 
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'iqc_db',
-  password: 'passw0rd', // <--- รหัสผ่านความปลอดภัยใหม่ของคุณเฟม
-  port: 5432,
+  connectionString = "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 });
 
 // 🌟 [Auto-Migration] ตรวจสอบและสร้าง Table ระบบหลักและคิวงานเปลี่ยนพิน

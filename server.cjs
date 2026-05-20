@@ -12,7 +12,7 @@ app.use(express.json());
 
 // 🔴 ใช้ : ไม่ใช่ = ในการตั้งค่า Connection
 const pool = new Pool({
-  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWbO0i@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 });
 
 async function initDatabase() {

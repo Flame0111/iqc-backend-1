@@ -19,7 +19,7 @@ const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'iqc_db',
-  password: 'Utac_IQC_db_2026!', // <--- รหัสผ่านความปลอดภัยใหม่ของคุณเฟม
+  password: 'passw0rd', // <--- รหัสผ่านความปลอดภัยใหม่ของคุณเฟม
   port: 5432,
 });
 

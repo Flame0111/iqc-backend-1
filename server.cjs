@@ -16,10 +16,8 @@ const pool = new Pool({
 
 async function initDatabase() {
   try {
-    // 1. จัดการตาราง IQC หลัก
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
     
-    // 2. สร้างตาราง Pin Changing
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
@@ -32,11 +30,14 @@ async function initDatabase() {
       );
     `);
     
-    // 3. เพิ่มคอลัมน์ใหม่ตามโครงสร้างที่ต้องการ
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS pin_no VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS stock_pin_no VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS name_socket VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
+    
+    // 🌟 สร้าง 2 คอลัมน์ใหม่ สำหรับ Customer และคนขอรีเควส
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS customer_name VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS req_name VARCHAR(100);`);
     
     console.log("🗄️ Database Sync Success. All new columns added.");
   } catch (err) { console.error("Migration Error: ", err.message); }
@@ -46,7 +47,6 @@ initDatabase();
 const upload = multer({ dest: 'uploads/' });
 const SECRET_KEY = "Utac_Iqc_Enterprise_Secret_2026_XyZ"; 
 
-// 🌟 ระบบ User ของคุณเฟม
 const usersDB = [
   { username: "user", password: "12345", role: "viewer", name: "User" },
   { username: "contactor", password: "Pmewmyhero007", role: "contactor", name: "Contactor Member" },
@@ -111,25 +111,14 @@ app.post('/api/submit-iqc', verifyToken, upload.any(), async (req, res) => {
 
     const insertQuery = `INSERT INTO iqc_records (hw_name, supplier, date_recv, invoice_no, hw_desc, po_no, serial_no, customer, owner, send_by, location, checked_by, iqc_result, job_status, checklist_data, document_paths, image_paths) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id;`;
     
-    // 🌟 ดึงข้อมูล checkedBy จากฟอร์ม ถ้าไม่มีให้ใช้ชื่อคน Login
     const values = [
-      iqcData.hwName, 
-      iqcData.supplier, 
-      iqcData.dateRecv || null, 
-      iqcData.invoiceNo, 
-      iqcData.hwDesc, 
-      iqcData.poNo, 
-      iqcData.serialNo, 
-      iqcData.customer, 
-      iqcData.owner, 
-      iqcData.sendBy, 
-      iqcData.location, 
-      iqcData.checkedBy || req.user.name, // <--- จุดที่แก้
-      iqcData.finalResult || 'PENDING', 
-      'Awaiting', 
-      JSON.stringify(checklistData), 
-      JSON.stringify(documentPaths), 
-      JSON.stringify(imagePaths)
+      iqcData.hwName, iqcData.supplier, iqcData.dateRecv || null, 
+      iqcData.invoiceNo, iqcData.hwDesc, iqcData.poNo, 
+      iqcData.serialNo, iqcData.customer, iqcData.owner, 
+      iqcData.sendBy, iqcData.location, 
+      iqcData.checkedBy || req.user.name, 
+      iqcData.finalResult || 'PENDING', 'Awaiting', 
+      JSON.stringify(checklistData), JSON.stringify(documentPaths), JSON.stringify(imagePaths)
     ];
     
     const result = await pool.query(insertQuery, values);
@@ -162,10 +151,10 @@ app.get('/api/pin-change-list', verifyToken, async (req, res) => {
 
 app.post('/api/pin-change-request', verifyToken, async (req, res) => {
   try {
-    const { location, pin_no, stock_pin_no, name_socket } = req.body;
+    const { location, pin_no, stock_pin_no, name_socket, customer_name, req_name } = req.body;
     await pool.query(
-      `INSERT INTO pin_changing_requests (location, pin_no, stock_pin_no, name_socket, requested_by, status) VALUES ($1, $2, $3, $4, $5, 'Pending')`,
-      [location, pin_no, stock_pin_no, name_socket, req.user.name]
+      `INSERT INTO pin_changing_requests (location, pin_no, stock_pin_no, name_socket, requested_by, customer_name, req_name, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'Pending')`,
+      [location, pin_no, stock_pin_no, name_socket, req.user.name, customer_name, req_name]
     );
     res.status(200).json({ success: true, message: "Request created and auto-accepted" });
   } catch (error) { res.status(500).json({ error: error.message }); }

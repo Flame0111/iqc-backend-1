@@ -47,9 +47,9 @@ const upload = multer({ dest: 'uploads/' });
 const SECRET_KEY = "Utac_Iqc_Enterprise_Secret_2026_XyZ"; 
 
 const usersDB = [
-  { username: "viewer", password: "View@Only26!", role: "viewer", name: "Guest User" },
-  { username: "user", password: "User@Iqc26!", role: "contactor", name: "IQC Engineer" },
-  { username: "admin", password: "Admin@Secure26!", role: "admin", name: "System Admin" }
+  { username: "user", password: "12345", role: "viewer", name: "User" },
+  { username: "contactor", password: "Pmewmyhero007", role: "contactor", name: "Contactor Member" },
+  { username: "admin", password: "Admin@Secure26!", role: "admin", name: "Administrator" }
 ];
 
 app.post('/api/login', (req, res) => {

@@ -11,19 +11,19 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], credentia
 app.use(express.json()); 
 
 const pool = new Pool({
-  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWbO0i@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 });
 
 async function initDatabase() {
   try {
+    // 1. จัดการตาราง IQC หลัก
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
+    
+    // 2. สร้างตาราง Pin Changing
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
         location VARCHAR(50),
-        pin_no VARCHAR(100),
-        stock_pin_no VARCHAR(100),
-        name_socket VARCHAR(100),
         requested_by VARCHAR(100),
         accepted_by VARCHAR(100) DEFAULT NULL,
         status VARCHAR(50) DEFAULT 'Pending',
@@ -31,7 +31,14 @@ async function initDatabase() {
         completed_at TIMESTAMP DEFAULT NULL
       );
     `);
-    console.log("🗄️ Database Sync Success.");
+    
+    // 3. เพิ่มคอลัมน์ใหม่ตามโครงสร้างที่ต้องการ
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS pin_no VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS stock_pin_no VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS name_socket VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
+    
+    console.log("🗄️ Database Sync Success. All new columns added.");
   } catch (err) { console.error("Migration Error: ", err.message); }
 }
 initDatabase();
@@ -39,10 +46,11 @@ initDatabase();
 const upload = multer({ dest: 'uploads/' });
 const SECRET_KEY = "Utac_Iqc_Enterprise_Secret_2026_XyZ"; 
 
+// 🌟 ระบบ User ของคุณเฟม
 const usersDB = [
-  { username: "viewer", password: "View@Only26!", role: "viewer", name: "Guest User" },
-  { username: "user", password: "User@Iqc26!", role: "contactor", name: "IQC Engineer" },
-  { username: "admin", password: "Admin@Secure26!", role: "admin", name: "System Admin" }
+  { username: "user", password: "12345", role: "viewer", name: "User" },
+  { username: "contactor", password: "Pmewmyhero007", role: "contactor", name: "Contactor Member" },
+  { username: "admin", password: "Admin@Secure26!", role: "admin", name: "Administrator" }
 ];
 
 app.post('/api/login', (req, res) => {
@@ -65,6 +73,9 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+// ==========================================
+// IQC PROTOCOL APIs
+// ==========================================
 app.get('/api/iqc-list', verifyToken, async (req, res) => {
   try {
     const allRecords = await pool.query(`SELECT id, location, date_recv, created_at, owner, send_by, hw_name, serial_no, invoice_no, checked_by, iqc_result, job_status, checklist_data FROM iqc_records ORDER BY created_at DESC`);
@@ -100,15 +111,25 @@ app.post('/api/submit-iqc', verifyToken, upload.any(), async (req, res) => {
 
     const insertQuery = `INSERT INTO iqc_records (hw_name, supplier, date_recv, invoice_no, hw_desc, po_no, serial_no, customer, owner, send_by, location, checked_by, iqc_result, job_status, checklist_data, document_paths, image_paths) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id;`;
     
-    // 🌟 เปลี่ยนจาก req.user.name เป็น iqcData.checkedBy ตามที่คุณเฟมรีเควส
+    // 🌟 ดึงข้อมูล checkedBy จากฟอร์ม ถ้าไม่มีให้ใช้ชื่อคน Login
     const values = [
-      iqcData.hwName, iqcData.supplier, iqcData.dateRecv || null, 
-      iqcData.invoiceNo, iqcData.hwDesc, iqcData.poNo, 
-      iqcData.serialNo, iqcData.customer, iqcData.owner, 
-      iqcData.sendBy, iqcData.location, 
-      iqcData.checkedBy || req.user.name, 
-      iqcData.finalResult || 'PENDING', 'Awaiting', 
-      JSON.stringify(checklistData), JSON.stringify(documentPaths), JSON.stringify(imagePaths)
+      iqcData.hwName, 
+      iqcData.supplier, 
+      iqcData.dateRecv || null, 
+      iqcData.invoiceNo, 
+      iqcData.hwDesc, 
+      iqcData.poNo, 
+      iqcData.serialNo, 
+      iqcData.customer, 
+      iqcData.owner, 
+      iqcData.sendBy, 
+      iqcData.location, 
+      iqcData.checkedBy || req.user.name, // <--- จุดที่แก้
+      iqcData.finalResult || 'PENDING', 
+      'Awaiting', 
+      JSON.stringify(checklistData), 
+      JSON.stringify(documentPaths), 
+      JSON.stringify(imagePaths)
     ];
     
     const result = await pool.query(insertQuery, values);
@@ -129,6 +150,9 @@ app.delete('/api/iqc/:id', verifyToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+// ==========================================
+// PIN CHANGING QUEUE APIs
+// ==========================================
 app.get('/api/pin-change-list', verifyToken, async (req, res) => {
   try {
     const records = await pool.query(`SELECT * FROM pin_changing_requests ORDER BY created_at DESC`);

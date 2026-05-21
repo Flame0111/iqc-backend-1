@@ -10,38 +10,36 @@ const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], credentials: true }));
 app.use(express.json()); 
 
-// 🔴 ใช้ : ไม่ใช่ = ในการตั้งค่า Connection
 const pool = new Pool({
-  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWb0Oi@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  connectionString: "postgresql://neondb_owner:npg_KZ5XLtSWbO0i@ep-holy-star-ao9ueqj9-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 });
 
 async function initDatabase() {
   try {
-    // ใช้ ALTER TABLE เพื่อเพิ่มคอลัมน์โดยไม่ทำลายข้อมูลเดิม
+    // 1. จัดการตาราง IQC หลัก
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
-
-    // สร้างตาราง pin_changing_requests โดยไม่มี Comment // กวนใจ
+    
+    // 2. สร้างตาราง Pin Changing
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
         location VARCHAR(50),
-        contac_no VARCHAR(100),
-        contac_sn VARCHAR(100),
         requested_by VARCHAR(100),
         accepted_by VARCHAR(100) DEFAULT NULL,
-        status VARCHAR(50) DEFAULT 'Awaiting',
+        status VARCHAR(50) DEFAULT 'Pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         completed_at TIMESTAMP DEFAULT NULL
       );
     `);
-
-    // เพิ่มคอลัมน์ completed_at ให้ตาราง pin_changing_requests
+    
+    // 3. เพิ่มคอลัมน์ใหม่ตามโครงสร้างที่ต้องการ
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS pin_no VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS stock_pin_no VARCHAR(100);`);
+    await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS name_socket VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
     
-    console.log("🗄️ Database Sync Success.");
-  } catch (err) { 
-    console.error("Migration Error: ", err.message); 
-  }
+    console.log("🗄️ Database Sync Success. All new columns added.");
+  } catch (err) { console.error("Migration Error: ", err.message); }
 }
 initDatabase();
 
@@ -74,6 +72,9 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+// ==========================================
+// IQC PROTOCOL APIs
+// ==========================================
 app.get('/api/iqc-list', verifyToken, async (req, res) => {
   try {
     const allRecords = await pool.query(`SELECT id, location, date_recv, created_at, owner, send_by, hw_name, serial_no, invoice_no, checked_by, iqc_result, job_status, checklist_data FROM iqc_records ORDER BY created_at DESC`);
@@ -126,25 +127,25 @@ app.delete('/api/iqc/:id', verifyToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+// ==========================================
+// PIN CHANGING QUEUE APIs
+// ==========================================
 app.get('/api/pin-change-list', verifyToken, async (req, res) => {
   try {
-    const records = await pool.query(`SELECT id, location, contac_no, contac_sn, requested_by, accepted_by, status, created_at, completed_at FROM pin_changing_requests ORDER BY created_at DESC`);
+    const records = await pool.query(`SELECT * FROM pin_changing_requests ORDER BY created_at DESC`);
     res.status(200).json({ success: true, data: records.rows });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/pin-change-request', verifyToken, async (req, res) => {
   try {
-    const { location, contac_no, contac_sn } = req.body;
-    await pool.query(`INSERT INTO pin_changing_requests (location, contac_no, contac_sn, requested_by, status) VALUES ($1, $2, $3, $4, 'Awaiting')`, [location, contac_no, contac_sn, req.user.name]);
-    res.status(200).json({ success: true });
-  } catch (error) { res.status(500).json({ error: error.message }); }
-});
-
-app.put('/api/pin-change-accept/:id', verifyToken, async (req, res) => {
-  try {
-    await pool.query(`UPDATE pin_changing_requests SET status = 'Pending', accepted_by = $1 WHERE id = $2`, [req.user.name, req.params.id]);
-    res.status(200).json({ success: true });
+    const { location, pin_no, stock_pin_no, name_socket } = req.body;
+    // 🌟 Auto-Accept: บันทึกลงสถานะ 'Pending' ทันที ไม่ต้องรอ Accept
+    await pool.query(
+      `INSERT INTO pin_changing_requests (location, pin_no, stock_pin_no, name_socket, requested_by, status) VALUES ($1, $2, $3, $4, $5, 'Pending')`,
+      [location, pin_no, stock_pin_no, name_socket, req.user.name]
+    );
+    res.status(200).json({ success: true, message: "Request created and auto-accepted" });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 

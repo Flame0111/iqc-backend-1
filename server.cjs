@@ -12,7 +12,7 @@ app.use(express.json());
 
 // 🌟 เอาลิงก์ Supabase (หรือ Cloud ตัวใหม่) ของคุณเฟมมาใส่ตรงนี้นะครับ
 const pool = new Pool({
-  connectionString: "postgresql://postgres:Admin@Secure26!@db.kjxhdmwbcxmaadxdolfg.supabase.co:5432/postgres"
+  connectionString: "postgresql://postgres.kjxhdmwbcxmaadxdolfg:Admin@Secure26!@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require"
 });
 
 async function initDatabase() {

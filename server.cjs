@@ -10,14 +10,41 @@ const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], credentials: true }));
 app.use(express.json()); 
 
+// 🌟 เอาลิงก์ Supabase (หรือ Cloud ตัวใหม่) ของคุณเฟมมาใส่ตรงนี้นะครับ
 const pool = new Pool({
-  connectionString: "postgresql://postgres:Admin@Secure26!@db.kjxhdmwbcxmaadxdolfg.supabase.co:5432/postgres"
+  connectionString: "postgresql://postgres:[Admin@Secure26!]@db.kjxhdmwbcxmaadxdolfg.supabase.co:5432/postgres"
 });
 
 async function initDatabase() {
   try {
+    // 🌟 1. สร้างตารางหลัก iqc_records ก่อน (สำหรับ Database ใหม่ที่ยังโล่ง)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS iqc_records (
+        id SERIAL PRIMARY KEY,
+        hw_name VARCHAR(255),
+        supplier VARCHAR(255),
+        date_recv DATE,
+        invoice_no VARCHAR(255),
+        hw_desc TEXT,
+        po_no VARCHAR(255),
+        serial_no VARCHAR(255),
+        customer VARCHAR(255),
+        owner VARCHAR(255),
+        send_by VARCHAR(255),
+        location VARCHAR(255),
+        checked_by VARCHAR(255),
+        iqc_result VARCHAR(50),
+        checklist_data JSONB,
+        document_paths JSONB,
+        image_paths JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // อัปเดตคอลัมน์เพิ่มเติมเผื่อไว้
     await pool.query(`ALTER TABLE iqc_records ADD COLUMN IF NOT EXISTS job_status VARCHAR(50) DEFAULT 'Awaiting';`);
     
+    // 🌟 2. สร้างตาราง Pin Changing
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pin_changing_requests (
         id SERIAL PRIMARY KEY,
@@ -30,16 +57,15 @@ async function initDatabase() {
       );
     `);
     
+    // 3. เพิ่มคอลัมน์ใหม่ๆ ลงไป
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS pin_no VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS stock_pin_no VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS name_socket VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL;`);
-    
-    // 🌟 สร้าง 2 คอลัมน์ใหม่ สำหรับ Customer และคนขอรีเควส
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS customer_name VARCHAR(100);`);
     await pool.query(`ALTER TABLE pin_changing_requests ADD COLUMN IF NOT EXISTS req_name VARCHAR(100);`);
     
-    console.log("🗄️ Database Sync Success. All new columns added.");
+    console.log("🗄️ Database Sync Success. All tables and columns are ready.");
   } catch (err) { console.error("Migration Error: ", err.message); }
 }
 initDatabase();

@@ -7,7 +7,11 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], credentials: true }));
+app.use(cors({ 
+  origin: 'https://contactorweb.netlify.app/', // เอา URL ของ Netlify มาใส่ (ลบ / เครื่องหมายสแลชท้ายสุดออกด้วยนะครับ)
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true 
+}));
 app.use(express.json()); 
 
 // 🌟 เอาลิงก์ Supabase (หรือ Cloud ตัวใหม่) ของคุณเฟมมาใส่ตรงนี้นะครับ

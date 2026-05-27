@@ -74,7 +74,18 @@ async function initDatabase() {
 }
 initDatabase();
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ 
+  dest: 'uploads/',
+  limits: { fileSize: 5 * 1024 * 1024 }, // บังคับขนาดไฟล์ห้ามเกิน 5MB
+  fileFilter: (req, file, cb) => {
+    // ยอมรับเฉพาะรูปภาพ และ PDF
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('ไม่อนุญาตให้อัปโหลดไฟล์ประเภทนี้!'));
+    }
+  }
+});
 const SECRET_KEY = "Utac_Iqc_Enterprise_Secret_2026_XyZ"; 
 
 const usersDB = [
